@@ -5,6 +5,12 @@ import random
 import sqlite3
 
 
+def QuickRoll(result, other=None):
+    if other is not None:
+        return f"Die 1: {result}, Die 2: {other}"
+    if isinstance(result, (tuple, list)) and len(result) >= 2:
+        return f"Die 1: {result[0]}, Die 2: {result[1]}"
+    return f"Roll: {result}"
 
 
 def leaderboard(parent):
@@ -20,27 +26,35 @@ def leaderboard(parent):
     Label(leaderboard_win, text="Leaderboard", font=("Segoe UI", 11, "bold")).pack(padx=12, pady=(10, 6))
     for idx, row in enumerate(rows, start=1):
         Label(leaderboard_win, text=f"{idx}. {row[0]} - {row[1]}").pack(anchor='w', padx=12)
-# Animation
-def RollAnimation(result, parent, colour = "black", times=10, delay=0.08):
-    lbl = Label(parent, text="Rolling...", font=("Segoe UI", 10, "bold"), fg=colour)
-    lbl.pack(padx=12, pady=12)
 
-    for _ in range(times):
-        temp_roll = DiceRoll()
-        lbl.config(text=f"Rolling... {temp_roll}")
+
+def RollAnimation(result, parent, quick=False, colour="black", times=10, delay=0.08):
+    if quick:
+        lbl = Label(parent, text=QuickRoll(result), font=("Segoe UI", 10, "bold"), fg=colour)
+        lbl.pack(padx=12, pady=12)
         parent.update()
-        time.sleep(delay)
+        parent.after(2000, lbl.destroy)
+    else:
+        lbl = Label(parent, text="Rolling...", font=("Segoe UI", 10, "bold"), fg=colour)
+        lbl.pack(padx=12, pady=12)
 
-    lbl.config(text=f"Final Roll: {result}")
-    parent.update()
-    parent.after(2000, lbl.destroy)
+        for _ in range(times):
+            temp_roll = DiceRoll()
+            lbl.config(text=f"Rolling... {temp_roll}")
+            parent.update()
+            time.sleep(delay)
+
+        lbl.config(text=f"Final Roll: {result}")
+        parent.update()
+        parent.after(2000, lbl.destroy)
+
 
 class Game:
     def __init__(self, player_obj: player, master=None):
         self.player = player_obj
         self.day = int(self.player.stats.get('Day', 1))
-        self.ammo = int(self.player.stats.get('Ammo', 10) or 10)
-        self.food = int(self.player.stats.get('Food', 10) or 10)
+        self.ammo = int(self.player.stats.get('Ammo', 20) or 20)
+        self.food = int(self.player.stats.get('Food', 20) or 20)
         self.survivors = int(self.player.stats.get('Survivors', 1) or 1)
         self.dog = bool(self.player.stats.get('Dog', 1))
         core_val = self.player.stats.get('Gang', '')
@@ -48,12 +62,12 @@ class Game:
         self.gang_display = ', '.join(check_gang_members(self.player.username))
         self.master = Toplevel() if master is None else Toplevel(master)
         self.master.title(f"Survival: {self.player.username}")
+        self.cooldown = False
 
         self._build_ui()
         self._recruit_on_start()
         self._update_ui()
 
-    # makes it look nice
     def _build_ui(self):
         self.lbl_day = Label(self.master, text="")
         self.lbl_day.pack(fill=X, padx=8, pady=4)
@@ -63,16 +77,26 @@ class Game:
 
         self.msg = Text(self.master, height=10, wrap='word')
         self.msg.pack(fill=BOTH, expand=True, padx=8, pady=4)
-
+        
         self.btn_next = Button(
             self.master,
             text="Next Day",
-            command=lambda: self.next_day(check_gang_members(self.player.username))
-        )
+            command=self._next_day_handler)
         self.btn_next.pack(side=BOTTOM, fill=X, padx=8, pady=6)
 
+    def _next_day_handler(self):
+        if self.cooldown:
+            return
+        self.cooldown = True
+        self.btn_next.config(state="disabled")
+        self.next_day(check_gang_members(self.player.username))
+        self.master.after(500, self._enable_button)
+
+    def _enable_button(self):
+        self.cooldown = False
+        self.btn_next.config(state="normal")
+
     def _append_msg(self, text: str):
-        # ensure msg exists
         try:
             self.msg.insert(END, text + "\n\n")
             self.msg.see(END)
@@ -80,15 +104,13 @@ class Game:
             pass
     
     def _update_ui(self):
-        # updates labels
         self.lbl_day.config(text=f"Day: {self.day}")
         stats_text = (
             f"Ammo: {self.ammo}    Food: {self.food}    Survivors: {self.survivors}\n"
-            f"Dog: {'Alive' if self.dog else 'Gone'}    Gang: {self.gang_display}"
+            f"Scooby-Doo: {'Alive' if self.dog else 'Gone'}    Gang: {self.gang_display}"
         )
         self.lbl_stats.config(text=stats_text)
 
-    # saving progress
     def save_to_player(self):
         self.player.stats['Day'] = self.day
         self.player.stats['Ammo'] = self.ammo
@@ -108,18 +130,19 @@ class Game:
             conn.commit()
         finally:
             conn.close()
+
     def reset_game(self):
         self.day = 1
-        self.ammo = 10
-        self.food = 10
+        self.ammo = 20
+        self.food = 20
         self.survivors = 1
         self.dog = True
         self.core = ''
         self.gang_display = ''
         self._update_ui()
         self.save_to_player()
+
     def calculate_score(self, win: bool):
-        #end screen
         survivors_score = self.survivors * 100
         food_score = self.food * 5
         ammo_score = self.ammo * 2
@@ -170,19 +193,18 @@ class Game:
 
         return total
 
-    def _recruit_on_start(self):
+    def _recruit_on_start(self, quickroll=False):
         if not self.core:
-            member = self.recruit_members()
+            member = self.recruit_members(quick=quickroll)
             if member:
                 self._append_msg(f"You recruited {member} at game start!")
             else:
                 self._append_msg("No recruits found at game start.")
         self.gang_display = ', '.join(check_gang_members(self.player.username))
 
-    def recruit_members(self):
-        # roll 1-4 to decide recruit
+    def recruit_members(self, quick=False):
         d1 = DiceRoll(4)
-        RollAnimation(d1, self.master, colour="green")
+        RollAnimation(d1, self.master, quick=quick, colour="green")
 
         code_map = {"Fred": "F", "Daphne": "D", "Shaggy": "S"}
         recruited = None
@@ -206,37 +228,38 @@ class Game:
                 conn.commit()
             finally:
                 conn.close()
-            # update in-memory player.stats and display names
             self.player.stats['Gang'] = self.core
             self.gang_display = ', '.join(check_gang_members(self.player.username))
-            # update UI
             self._update_ui()
             return recruited
         else:
-            # already recruited
             return None
 
-    def next_day(self, gang_members):
+    def next_day(self, gang_members, quickroll=False):
         if self.day >= 100:
             self._append_msg("You have survived 100 days — you win!")
+            self.btn_next.config(state="disabled")
+            self.cooldown = True
+            try:
+                self.calculate_score(win=True)
+            except Exception:
+                pass
             return
+
         self.day += 1
         d1 = DiceRoll()
-        RollAnimation(d1, self.master)
-        self._append_msg(f"First die: {d1}")
-
         d2 = DiceRoll()
-        RollAnimation(d2, self.master)
-        self._append_msg(f"Second die: {d2}")
+        RollAnimation((d1, d2), self.master, quick=quickroll)
+        self._append_msg(f"First die: {d1}, Second die: {d2}")
         if d1 in (1, 3):
             zombies = random.randint(1, 4)
             self._append_msg(f"Zombie encounter! {zombies} zombies attack.")
             if "Fred" in gang_members:
                 d3 = DiceRoll()
-                RollAnimation(d3, self.master, colour="red")
+                RollAnimation(d3, self.master, quick=quickroll, colour="red")
                 if d3 >= 4:
-                    self._append_msg("Fred rushes at the zombies, taking out a couple zombies!")
-                    zombies = max(0, zombies - 2)
+                    self._append_msg("Fred rushes at the zombies, taking out a group of zombies!")
+                    zombies = max(0, zombies - 4)
                 elif d3 == 1:
                     self._append_msg("Fred fails in his attack, and he is lost in the horde")
                     try:
@@ -252,31 +275,31 @@ class Game:
                 self.survivors = max(0, self.survivors - losses)
                 self.ammo = 0
         elif d1 == 2:
-            found = random.randint(1, 8)
+            found = random.randint(5, 8)
             self._append_msg(f"You scavenge and find {found} ammo.")
-            if "Shaggy" in gang_members:
+            if self.dog is True:
                 d4 = DiceRoll()
-                RollAnimation(d4, self.master, colour="blue")
+                RollAnimation(d4, self.master, quick=quickroll, colour="blue")
                 if d4 >= 5:
-                    found += 1
-                    self._append_msg("Shaggy's keen senses help you find extra ammo!")
+                    found += 4
+                    self._append_msg("Scooby-Doo sniffs out extra ammo!")
                 else:
-                    self._append_msg("Shaggy fails to find anything.")
+                    self._append_msg("Scooby fails to find anything.")
             self.ammo += found
         elif d1 == 4:
-            found = random.randint(1, 8)
+            found = random.randint(5, 8)
             self._append_msg(f"You scavenge and find {found} food.")
             if "Shaggy" in gang_members:
                 d3 = DiceRoll()
-                RollAnimation(d3, self.master,colour="blue")
+                RollAnimation(d3, self.master, colour="blue")
                 if d3 >= 5:
-                    found += 1
+                    found += 4
                     self._append_msg("Shaggy's keen senses help you find extra food!")
                 else:
                     self._append_msg("Shaggy fails to find anything.")
             self.food += found
         elif d1 == 5:
-            if d2 == 5:
+            if d2 % 2 == 0:
                 self.recruit_members()
             else:
                 self._append_msg("A quiet day. Survivors rest and recover morale.")
@@ -287,26 +310,25 @@ class Game:
             else:
                 if self.food > 2:
                     if "Daphne" in gang_members:
-                        self.food = max(0, self.food - 2)
-                        self.ammo += 2
+                        self.food = max(0, self.food - 3)
+                        self.ammo += 8
+                        self._append_msg("A survivor trades 3 food for 5 ammo.")
                         self._append_msg("Daphne negotiates a better trade: 3 food for 8 ammo.")
                     else:
-                        self.food = max(0, self.food - 1)
-                        self.ammo += 1
+                        self.food = max(0, self.food - 3)
+                        self.ammo += 5
                         self._append_msg("A survivor trades 3 food for 5 ammo.")
                 else:
                     self._append_msg("A survivor offers a trade but you have no food.")
 
-        # daily consumption
         daily_food_needed = max(1, self.survivors + len(gang_members) // 2)
         if self.food >= daily_food_needed:
             self.food -= daily_food_needed
             self._append_msg(f"Your group consumed {daily_food_needed} food today.")
         else:
-            # penalty
             if "Shaggy" in gang_members:
                 d3 = DiceRoll()
-                RollAnimation(d3, self.master, colour="blue")
+                RollAnimation(d3, self.master, quick=quickroll, colour="blue")
                 if d3 >= 4:
                     self._append_msg("Shaggy searches for more food, and successfully prevents starvation.")
                 elif d3 == 1:
@@ -327,7 +349,6 @@ class Game:
                 self.survivors = max(0, self.survivors - lost)
                 self.food = 0
 
-        # dog random event
         if self.dog and random.random() < 0.02:
             self.dog = False
             self._append_msg("Tragically, you lost Scooby during the night.")
@@ -335,19 +356,12 @@ class Game:
         self._update_ui()
         self.save_to_player()
 
-        # end conditions
         if self.survivors <= 0:
             self._append_msg(f"You survived until Day {self.day} but were wiped out. Game over.")
             self.btn_next.config(state="disabled")
+            self.cooldown = True
             try:
                 self.calculate_score(win=False)
-            except Exception:
-                pass
-        elif self.day >= 100:
-            self._append_msg("You survived 100 days — Rescue arrived! You win.")
-            self.btn_next.config(state="disabled")
-            try:
-                self.calculate_score(win=True)
             except Exception:
                 pass
 

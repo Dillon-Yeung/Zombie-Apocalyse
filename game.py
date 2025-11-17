@@ -54,7 +54,7 @@ class Game:
         self.player = player_obj
         self.day = int(self.player.stats.get('Day', 1))
         self.ammo = int(self.player.stats.get('Ammo', 20) or 20)
-        self.food = int(self.player.stats.get('Food', 20) or 20)
+        self.food = int(self.player.stats.get('Food', 30) or 30)
         self.survivors = int(self.player.stats.get('Survivors', 1) or 1)
         self.dog = bool(self.player.stats.get('Dog', 1))
         core_val = self.player.stats.get('Gang', '')
@@ -275,7 +275,7 @@ class Game:
                 self.survivors = max(0, self.survivors - losses)
                 self.ammo = 0
         elif d1 == 2:
-            found = random.randint(5, 8)
+            found = random.randint(5, 10*self.survivors)
             self._append_msg(f"You scavenge and find {found} ammo.")
             if self.dog is True:
                 d4 = DiceRoll()
@@ -287,7 +287,7 @@ class Game:
                     self._append_msg("Scooby fails to find anything.")
             self.ammo += found
         elif d1 == 4:
-            found = random.randint(5, 8)
+            found = random.randint(5, 10*self.survivors)
             self._append_msg(f"You scavenge and find {found} food.")
             if "Shaggy" in gang_members:
                 d3 = DiceRoll()
@@ -308,18 +308,34 @@ class Game:
                 self.survivors += 1
                 self._append_msg("You recruit a wandering survivor.")
             else:
-                if self.food > 2:
-                    if "Daphne" in gang_members:
-                        self.food = max(0, self.food - 3)
-                        self.ammo += 8
-                        self._append_msg("A survivor trades 3 food for 5 ammo.")
-                        self._append_msg("Daphne negotiates a better trade: 3 food for 8 ammo.")
+                d3 = DiceRoll()
+                RollAnimation(d3, self.master, quick=quickroll, colour="red")
+                if d3%2==0:
+                    if self.food > 2:
+                        if "Daphne" in gang_members:
+                            self.food = max(0, self.food - 3)
+                            self.ammo += 8
+                            self._append_msg("A survivor trades 3 food for 5 ammo.")
+                            self._append_msg("Daphne negotiates a better trade: 3 food for 8 ammo.")
+                        else:
+                            self.food = max(0, self.food - 3)
+                            self.ammo += 5
+                            self._append_msg("A survivor trades 3 food for 5 ammo.")
                     else:
-                        self.food = max(0, self.food - 3)
-                        self.ammo += 5
-                        self._append_msg("A survivor trades 3 food for 5 ammo.")
+                        self._append_msg("A survivor offers a trade but you have no food.")
                 else:
-                    self._append_msg("A survivor offers a trade but you have no food.")
+                    if self.ammo > 4:
+                        if "Daphne" in gang_members:
+                            self.food = max(0, self.food - 3)
+                            self.ammo += 8
+                            self._append_msg("A survivor trades 5 ammo for 3 food.")
+                            self._append_msg("Daphne negotiates a better trade: 5 ammo for 4 food.")
+                        else:
+                            self.food = max(0, self.food - 3)
+                            self.ammo += 5
+                            self._append_msg("A survivor trades 5 ammo for 3 food.")
+                    else:
+                        self._append_msg("A survivor offers a trade but you have no ammo.")
 
         daily_food_needed = max(1, self.survivors + len(gang_members) // 2)
         if self.food >= daily_food_needed:

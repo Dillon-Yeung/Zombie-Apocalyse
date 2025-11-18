@@ -1,4 +1,4 @@
-# python3 file name
+# this is purely logic, obsolete in final version
 from main import *
 import random
 
